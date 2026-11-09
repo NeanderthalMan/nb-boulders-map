@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NB Boulders</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  html, body, #map { height: 100%; margin: 0; background: #111; }
+  #panel { position: absolute; z-index: 1000; top: 10px; left: 54px; background: rgba(20,20,20,.9);
+           color: #eee; font: 13px/1.4 system-ui, sans-serif; padding: 10px 12px; border-radius: 8px; width: 270px; }
+  #panel label { display: block; margin-top: 7px; }
+  #panel input[type=range] { width: 100%; }
+  #panel .row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  #panel small { color: #aaa; }
+  #panel details { margin-top: 8px; }
+  #panel { max-height: calc(100% - 40px); overflow-y: auto; box-sizing: border-box; }
+  #sources summary { cursor: pointer; color: #ccc; font-weight: 600; }
+  #sources ul { margin: 4px 0 0; padding-left: 16px; color: #bbb; font-size: 12px; }
+  #sources li { margin: 3px 0; }
+  #sources a { color: #8ab4ff; }
+  #sources b { color: #ddd; font-weight: 600; }
+  #share { margin-left: auto; background: #2d6cdf; color: #fff; border: 0; border-radius: 5px; padding: 3px 10px;
+           font: 600 12px system-ui, sans-serif; cursor: pointer; }
+  #share:hover { background: #3b7cf0; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 1px solid #000; vertical-align: -1px; }
+  .leaflet-popup-content { font: 12px/1.45 system-ui, sans-serif; }
+  .leaflet-tooltip.rank { background: none; border: none; box-shadow: none; padding: 0; font: bold 11px system-ui; color: #fff;
+    text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 2px #000; }
+  .leaflet-tooltip.rank::before { display: none; }
+  .fb textarea { width: 260px; height: 70px; font: 12px system-ui, sans-serif; box-sizing: border-box; }
+  .fb .row2 { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  .fb button { background: #2d6cdf; color: #fff; border: 0; border-radius: 5px; padding: 3px 10px; font: 600 12px system-ui; cursor: pointer; }
+  .fb .msg { color: #2a8a2a; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <div style="display:flex;align-items:center;gap:6px"><b>NB Boulders</b> <small id="status"></small>
+    <button id="share" title="Share a link to this exact view">Share</button></div>
+  <small id="shareMsg" style="display:none;color:#8f8"></small>
+  <label>Region <select id="region"></select></label>
+  <div class="row"><input type="checkbox" id="heatOn" checked><label for="heatOn" style="margin:0">Boulder-field heatmap</label></div>
+  <div class="row"><input type="checkbox" id="geoOn" checked><label for="geoOn" style="margin:0">Weight by geology (down-ice of granite)</label></div>
+  <label>Heat opacity <input id="op" type="range" min="0.1" max="1" step="0.05" value="0.8"></label>
+  <div class="row"><input type="checkbox" id="hotOn" checked><label for="hotOn" style="margin:0">Hotspots — top <b id="nv"></b></label></div>
+  <input id="n" type="range" min="10" max="500" step="10" value="60">
+  <div class="row"><input type="checkbox" id="newOnly"><label for="newOnly" style="margin:0">Only away from my pins</label></div>
+  <div class="row"><input type="checkbox" id="pinsOn" checked><label for="pinsOn" style="margin:0">My pins</label></div>
+  <div class="row"><input type="checkbox" id="intrOn"><label for="intrOn" style="margin:0">Granite-type bedrock (boulder source)</label></div>
+  <div class="row"><input type="checkbox" id="tillOn"><label for="tillOn" style="margin:0">Provincial till sites (boulder cover)</label></div>
+  <div style="margin-top:9px;border-top:1px solid #444;padding-top:6px"><b>Cliffs</b> <small id="cliffStatus"></small></div>
+  <div class="row"><input type="checkbox" id="cliffOn" checked><label for="cliffOn" style="margin:0">Cliff faces (lidar)</label></div>
+  <div class="row"><input type="checkbox" id="cragOn" checked><label for="cragOn" style="margin:0">Crags — top <b id="cnv"></b></label></div>
+  <input id="cn" type="range" min="10" max="300" step="10" value="40">
+  <label>Height <select id="band">
+    <option value="all">all faces ≥ 3 m</option><option value="lo">outcrops 3–10 m</option><option value="hi">crags ≥ 10 m</option></select></label>
+  <label>Steepest part ≥ <b id="angv"></b> <small>(true angle, lidar point cloud)</small>
+    <input id="ang" type="range" min="60" max="90" step="1" value="80"></label>
+  <div class="row"><input type="checkbox" id="unmOn"><label for="unmOn" style="margin:0">Hide faces not measured yet (dashed)</label></div>
+  <div class="row"><input type="checkbox" id="softOn"><label for="softOn" style="margin:0">Include sand/gravel banks &amp; gullies</label></div>
+  <small><span class="dot" style="background:#a3e635"></span> 3–10 m &nbsp; <span class="dot" style="background:#10b981"></span> 10–20 m &nbsp;
+    <span class="dot" style="background:#2563eb"></span> 20 m+ &nbsp; <span class="dot" style="background:#fff"></span> crag</small><br>
+  <small><span class="dot" style="background:#3cf"></span> my pin &nbsp;
+    <span class="dot" style="background:#ff4"></span> hotspot (new) &nbsp; <span class="dot" style="background:#999"></span> hotspot (known)</small>
+  <details id="sources"><summary>Data sources</summary>
+    <ul>
+      <li><b>Boulder heatmap, hotspots, cliff faces</b>: GeoNB 1 m lidar bare-earth DEM
+        (<a href="https://gis-erd-der.gnb.ca/server/rest/services/LidarProducts/DEM/ImageServer" target="_blank" rel="noopener">GeoNB LidarProducts/DEM</a>)</li>
+      <li><b>Cliff true angle</b>: GeoNB lidar point clouds (LAZ), via the
+        <a href="https://geonb.snb.ca/downloads/lidar_index/geonb_li-idl_shp.zip" target="_blank" rel="noopener">GeoNB lidar tile index</a></li>
+      <li><b>Masks for roads, rail, quarries, buildings, water</b>: OpenStreetMap via the
+        <a href="https://overpass-api.de/" target="_blank" rel="noopener">Overpass API</a> (© OpenStreetMap contributors, ODbL)</li>
+      <li><b>Geology weight, granite-type bedrock</b>:
+        <a href="https://gis-erd-der.gnb.ca/server/rest/services/OpenData/NBGS_Bedrock_Geology/MapServer" target="_blank" rel="noopener">NBGS bedrock geology</a></li>
+      <li><b>Rock vs. sand/gravel cliffs</b>:
+        <a href="https://gis-erd-der.gnb.ca/server/rest/services/OpenData/NBGS_GeneralizedSurficialGeology/MapServer" target="_blank" rel="noopener">NBGS generalized surficial geology</a></li>
+      <li><b>Till sites, ice-direction calibration</b>: NBGS till sample sites
+        (<a href="https://gis-erd-der.gnb.ca/server/rest/services/OpenData/NBGS_TillSampleSites/MapServer" target="_blank" rel="noopener">2015+</a>,
+        <a href="https://gis-erd-der.gnb.ca/server/rest/services/OpenData/NBGS_TillSampleSites1986_2014/MapServer" target="_blank" rel="noopener">1986–2014</a>)</li>
+      <li><b>Crown land</b>: <a href="https://gis-erd-der.gnb.ca/server/rest/services/OpenData/Crown_Lands/MapServer" target="_blank" rel="noopener">GNB Crown Lands</a></li>
+      <li><b>Base maps</b>: GeoNB lidar hillshade, DSM hillshade and canopy height
+        (<a href="https://gis-erd-der.gnb.ca/server/rest/services/LidarProducts/" target="_blank" rel="noopener">GeoNB LidarProducts</a>); Esri World Imagery and World Topo; OpenStreetMap tiles</li>
+      <li><b>My pins</b>: owner's own field locations</li>
+    </ul>
+    <small>NBGS = New Brunswick Geological Surveys; GeoNB / GNB = Government of New Brunswick. Hotspots and crags are model output, not surveyed features.</small>
+  </details>
+</div>
+<script>
+const ImgSrv = L.TileLayer.extend({
+  getTileUrl(c) {
+    const ts = this.getTileSize(), nw = c.scaleBy(ts), se = nw.add(ts);
+    const crs = this._map.options.crs, z = c.z;
+    const a = crs.project(this._map.unproject(nw, z)), b = crs.project(this._map.unproject(se, z));
+    return `${this._url}/exportImage?bbox=${a.x},${b.y},${b.x},${a.y}&bboxSR=3857&imageSR=3857` +
+           `&size=${ts.x},${ts.y}&format=jpgpng&transparent=true&f=image`;
+  }
+});
+const MapSrv = L.TileLayer.extend({
+  getTileUrl(c) {
+    const ts = this.getTileSize(), nw = c.scaleBy(ts), se = nw.add(ts);
+    const crs = this._map.options.crs, z = c.z;
+    const a = crs.project(this._map.unproject(nw, z)), b = crs.project(this._map.unproject(se, z));
+    return `${this._url}/export?bbox=${a.x},${b.y},${b.x},${a.y}&bboxSR=3857&imageSR=3857` +
+           `&size=${ts.x},${ts.y}&format=png32&transparent=true&f=image`;
+  }
+});
+const OD = 'https://gis-erd-der.gnb.ca/server/rest/services/OpenData/';
+const surfL = new MapSrv(OD + 'NBGS_GeneralizedSurficialGeology/MapServer', { maxZoom: 21, opacity: .55, attribution: 'NBGS' });
+const bedL = new MapSrv(OD + 'NBGS_Bedrock_Geology/MapServer', { maxZoom: 21, opacity: .5, attribution: 'NBGS' });
+const crownL = new MapSrv(OD + 'Crown_Lands/MapServer', { maxZoom: 21, opacity: .45, attribution: 'GNB Crown Lands' });
+const G = 'https://gis-erd-der.gnb.ca/server/rest/services/LidarProducts/';
+const imagery = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  { maxZoom: 21, maxNativeZoom: 19, attribution: 'Esri World Imagery' });
+const topo = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+  { maxZoom: 21, maxNativeZoom: 19, attribution: 'Esri World Topo' });
+const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 21, maxNativeZoom: 19, attribution: '© OpenStreetMap' });
+const hs = new ImgSrv(G + 'MultiDirectHillshade/ImageServer', { maxZoom: 21, attribution: 'GeoNB lidar' });
+const dsmhs = new ImgSrv(G + 'DSM_HS/ImageServer', { maxZoom: 21 });
+const chm = new ImgSrv(G + 'CanopyHeightModel/ImageServer', { maxZoom: 21, opacity: .6 });
+
+// --- URL state: everything needed to reproduce the view lives in the query string
+const Q = new URLSearchParams(location.search);
+const BASES = { hs, dsm: dsmhs, sat: imagery, topo, osm };
+const OVERS = { chm, surf: surfL, bed: bedL, crown: crownL };
+const baseKey = BASES[Q.get('base')] ? Q.get('base') : 'hs';
+const map = L.map('map', { layers: [BASES[baseKey]], maxZoom: 21, preferCanvas: true }).setView([45.74, -67.47], 12);
+for (const k of (Q.get('ov') || '').split(',')) if (OVERS[k]) OVERS[k].addTo(map);
+L.control.layers({ 'Lidar hillshade (bare earth)': hs, 'DSM hillshade': dsmhs, 'Satellite': imagery, 'Topo': topo, 'OSM': osm },
+                 { 'Canopy height': chm, 'Surficial geology (NBGS)': surfL, 'Bedrock geology (NBGS)': bedL,
+                   'Crown land': crownL }, { position: 'topright' }).addTo(map);
+L.control.scale({ imperial: false }).addTo(map);
+const $ = id => document.getElementById(id);
+const REGION = Q.get('region') || 'canterbury_mcadam';
+const CHECKS = { heat: 'heatOn', geo: 'geoOn', hot: 'hotOn', new: 'newOnly', pins: 'pinsOn', intr: 'intrOn', till: 'tillOn',
+                 cliff: 'cliffOn', crag: 'cragOn', soft: 'softOn', unm: 'unmOn' };
+for (const [k, id] of Object.entries(CHECKS)) if (Q.has(k)) $(id).checked = Q.get(k) === '1';
+if (Q.has('op')) $('op').value = Q.get('op');
+if (Q.has('n')) $('n').value = Q.get('n');
+if (Q.has('cn')) $('cn').value = Q.get('cn');
+if (Q.has('ang')) $('ang').value = Q.get('ang');
+if (['all', 'lo', 'hi'].includes(Q.get('band'))) $('band').value = Q.get('band');
+const START = (Q.get('c') || '').split(',').map(Number);   // lat,lon,zoom
+const HAS_START = START.length === 3 && START.every(Number.isFinite);
+if (HAS_START) map.setView([START[0], START[1]], START[2]);
+
+function stateParams(region = REGION, withView = true) {
+  const p = new URLSearchParams({ region });
+  if (withView) {
+    const c = map.getCenter();
+    p.set('c', `${c.lat.toFixed(5)},${c.lng.toFixed(5)},${map.getZoom()}`);
+  }
+  p.set('base', Object.keys(BASES).find(k => map.hasLayer(BASES[k])) || 'hs');
+  const ov = Object.keys(OVERS).filter(k => map.hasLayer(OVERS[k]));
+  if (ov.length) p.set('ov', ov.join(','));
+  for (const [k, id] of Object.entries(CHECKS)) p.set(k, $(id).checked ? '1' : '0');
+  p.set('op', $('op').value);
+  p.set('n', $('n').value);
+  p.set('cn', $('cn').value);
+  p.set('ang', $('ang').value);
+  p.set('band', $('band').value);
+  return p.toString().replace(/%2C/g, ',');
+}
+let ready = false;
+function syncUrl() { if (ready) history.replaceState(null, '', '?' + stateParams()); }
+map.on('moveend baselayerchange overlayadd overlayremove', syncUrl);
+document.querySelectorAll('#panel input, #panel select:not(#region):not(#ds)').forEach(el => el.addEventListener('change', syncUrl));
+$('share').onclick = async () => {
+  syncUrl();
+  const url = location.href, msg = $('shareMsg');
+  try {
+    if (navigator.share && matchMedia('(pointer: coarse)').matches) {
+      await navigator.share({ title: 'NB Boulders', url });
+      return;
+    }
+    await navigator.clipboard.writeText(url);
+    msg.textContent = 'Link copied to clipboard';
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;
+    msg.innerHTML = '<input readonly style="width:100%;font:11px monospace" value="' +
+      url.replace(/"/g, '&quot;') + '">';
+    msg.style.display = 'block';
+    msg.querySelector('input').select();
+    return;
+  }
+  msg.style.display = 'block';
+  setTimeout(() => { msg.style.display = 'none'; }, 2500);
+};
+
+const links = (lat, lon) => `<a target=_blank href="https://www.google.com/maps/search/?api=1&query=${lat},${lon}">Google Maps</a> ·
+  <a target=_blank href="https://www.google.com/maps/@${lat},${lon},400m/data=!3m1!1e3">Satellite</a><br><code>${lat.toFixed(6)}, ${lon.toFixed(6)}</code>`;
+
+// --- heatmap overlay
+let heat = null;
+async function loadHeat() {
+  try {
+    const o = await (await fetch(`../results/heat/${REGION}/overlay.json`, { cache: 'no-store' })).json();
+    window._ov = o;
+    const png = $('geoOn').checked && o.png_geo ? o.png_geo : o.png;
+    if (heat) map.removeLayer(heat);
+    heat = L.imageOverlay(`../results/${png}?t=${Date.now()}`, o.bounds, { opacity: +$('op').value, interactive: false });
+    if ($('heatOn').checked) heat.addTo(map);
+    return o;
+  } catch { $('status').textContent = '(heatmap not built yet)'; return null; }
+}
+$('heatOn').onchange = e => heat && (e.target.checked ? heat.addTo(map) : map.removeLayer(heat));
+$('geoOn').onchange = () => { loadHeat(); renderHot(); };
+$('op').oninput = e => heat && heat.setOpacity(+e.target.value);
+
+// --- hotspots
+let hot = null; const hotLayer = L.layerGroup().addTo(map);
+function renderHot() {
+  $('nv').textContent = $('n').value;
+  hotLayer.clearLayers();
+  if (!hot || !$('hotOn').checked) return;
+  const newOnly = $('newOnly').checked; let k = 0;
+  const key = $('geoOn').checked ? 'score' : 'density';
+  const feats = [...hot.features].sort((a, b) => (b.properties[key] ?? 0) - (a.properties[key] ?? 0));
+  feats.forEach((f, i) => f.properties._r = i + 1);
+  for (const f of feats) {
+    const p = f.properties;
+    if (newOnly && p.known) continue;
+    if (++k > +$('n').value) break;
+    const [lon, lat] = f.geometry.coordinates;
+    L.circleMarker([lat, lon], { radius: 6 + Math.min(p.field_ha, 10), color: '#000', weight: 1.5,
+      fillColor: p.known ? '#999' : '#ff4', fillOpacity: .85 })
+      .bindTooltip(`${p._r}`, { permanent: true, direction: 'right', className: 'rank', offset: [6, 0] })
+      .bindPopup(`<b>Hotspot #${p._r}</b>${p.known ? ' · <i>near your pins</i>' : ''}<br>
+        bump density <b>${(p.density * 100).toFixed(1)}%</b> of ground · hot field ≈ ${p.field_ha} ha<br>
+        geology: ${p.upice_km != null ? `granite-type rock <b>${p.upice_km} km</b> up-ice` : 'no granite-type rock within 25 km up-ice'} (weight ${p.geo_w ?? '–'})<br>
+        bedrock ${p.bedrock ?? '–'} (${p.lith ?? '–'}) · surficial ${p.surf ?? '–'} · ${p.crown ? '<b>Crown land</b>' : 'private/other land'}<br>
+        nearest pin ${p.nearest_pin_m != null ? (p.nearest_pin_m / 1000).toFixed(1) + ' km' : '–'}<br>${links(lat, lon)}`)
+      .addTo(hotLayer);
+  }
+  $('status').textContent = `— ${hot.features.length} hotspots`;
+}
+['n', 'newOnly', 'hotOn'].forEach(id => $(id).addEventListener('input', renderHot));
+$('n').addEventListener('change', syncUrl);
+
+// --- my pins
+const pinLayer = L.layerGroup();
+if ($('pinsOn').checked) pinLayer.addTo(map);
+fetch('../groundtruth/cranberry_pins.geojson').then(r => r.json()).then(g => {
+  for (const f of g.features) {
+    const [lon, lat] = f.geometry.coordinates;
+    L.circleMarker([lat, lon], { radius: 4, color: '#000', weight: 1, fillColor: '#3cf', fillOpacity: 1 })
+      .bindPopup(`<b>${f.properties.name}</b><br>${links(lat, lon)}`).addTo(pinLayer);
+  }
+});
+$('pinsOn').onchange = e => e.target.checked ? pinLayer.addTo(map) : map.removeLayer(pinLayer);
+
+// --- granite-type bedrock + till sites
+const intrLayer = L.layerGroup(), tillLayer = L.layerGroup();
+const LBL = ['', '<1%', '1–3%', '4–15%', '16–50%', '>50%'];
+const tillCol = v => ['#bbb', '#ccc', '#9cf', '#36f', '#a0f', '#f0f'][v || 0];
+fetch(`../results/layers/intrusive_${REGION}.geojson`).then(r => r.json()).then(g =>
+  L.geoJSON(g, { style: { color: '#c0392b', weight: 1.5, fillColor: '#e74c3c', fillOpacity: .12, dashArray: '4 3' },
+                 onEachFeature: (f, l) => l.bindTooltip(`intrusive bedrock ${f.properties.code}`) }).addTo(intrLayer)).catch(() => {});
+fetch(`../results/layers/till_${REGION}.geojson`).then(r => r.json()).then(g => {
+  for (const f of g.features) {
+    const p = f.properties, [lon, lat] = f.geometry.coordinates;
+    L.circleMarker([lat, lon], { radius: 3 + (p.SURF_BOULDER_L || 0) * 1.5, color: '#000', weight: 1, fillColor: tillCol(p.SURF_BOULDER_L), fillOpacity: .95 })
+      .bindPopup(`<b>Till site ${p.SAMPLE_STATION_ID}</b><br>large surface boulders: <b>${LBL[p.SURF_BOULDER_L] ?? '–'}</b> of ground<br>
+        small surface boulders: ${LBL[p.SURF_BOULDER_S] ?? '–'}<br><small>NB Geological Survey</small>`).addTo(tillLayer);
+  }
+}).catch(() => {});
+$('intrOn').onchange = e => e.target.checked ? intrLayer.addTo(map) : map.removeLayer(intrLayer);
+$('tillOn').onchange = e => e.target.checked ? tillLayer.addTo(map) : map.removeLayer(tillLayer);
+if ($('intrOn').checked) intrLayer.addTo(map);
+if ($('tillOn').checked) tillLayer.addTo(map);
+
+// --- cliffs: faces (lines coloured by height) + ranked crags (groups of faces)
+let cliffs = null, crags = null;
+const cliffLayer = L.layerGroup(), cragLayer = L.layerGroup();
+const hCol = h => h >= 20 ? '#2563eb' : h >= 10 ? '#10b981' : '#a3e635';
+const inBand = h => ({ all: true, lo: h < 10, hi: h >= 10 })[$('band').value];
+const soft = p => p.rock_w < 0.2 || p.ravine;
+// steepness filter: a measured face's steepest part (90th pct of its profiles) must reach the slider;
+// unmeasured faces (dashed) pass unless hidden
+const steepOk = p => p.angle_p90 == null ? !$('unmOn').checked : p.angle_p90 >= +$('ang').value;
+const angInfo = p => p.angle != null
+  ? `steepest part <b>${p.angle_p90}°</b>, typical ${p.angle}° (true angle, lidar point cloud)`
+  : `lidar ground-model slope ${p.slope ?? '–'}° <i>(true angle not measured yet — walls read 60–75° here)</i>`;
+const cliffInfo = (p, len = true) => `<b>${p.height} m</b> high${len ? ` · ${p.length} m long` : ''} · faces <b>${p.aspect_name}</b> (${p.aspect}°)<br>
+  surficial ${p.surf ?? '–'}${p.rock_w < 0.2 ? ' <i>(sand/gravel — may be a cut bank)</i>' : ''} · bedrock ${p.bedrock ?? '–'} (${p.lith ?? '–'})
+  ${p.ravine ? '<br><i>gully wall (opposite face close by)</i>' : ''}<br>${angInfo(p)}<br>${p.crown ? '<b>Crown land</b>' : 'private/other land'}`;
+function renderCliffs() {
+  $('cnv').textContent = $('cn').value;
+  $('angv').textContent = +$('ang').value > 60 ? $('ang').value + '°' : 'any';
+  cliffLayer.clearLayers(); cragLayer.clearLayers();
+  const showSoft = $('softOn').checked;
+  if (cliffs && $('cliffOn').checked) {
+    for (const f of cliffs.features) {
+      const p = f.properties;
+      if (!inBand(p.height) || (!showSoft && soft(p)) || !steepOk(p)) continue;
+      L.polyline(f.geometry.coordinates.map(([lo, la]) => [la, lo]),
+                 { color: hCol(p.height), weight: p.height >= 10 ? 4 : 3, opacity: .95,
+                   dashArray: p.angle == null ? '5 4' : null })
+        .bindPopup(`<b>Cliff face</b>${p.crag ? ` · crag C${p.crag}` : ''}<br>${cliffInfo(p)}<br>${links(p.lat, p.lon)}`).addTo(cliffLayer);
+    }
+  }
+  if (crags && $('cragOn').checked) {
+    let k = 0;
+    for (const f of crags.features) {
+      const p = f.properties;
+      if (!inBand(p.height) || (!showSoft && soft(p)) || !steepOk(p)) continue;
+      if (++k > +$('cn').value) break;
+      const [lon, lat] = f.geometry.coordinates;
+      L.circleMarker([lat, lon], { radius: 5 + Math.min(p.height / 5, 8), color: hCol(p.height), weight: 3, fillColor: '#fff', fillOpacity: .9,
+                                   dashArray: p.angle == null ? '3 3' : null })
+        .bindTooltip(`C${p.rank}`, { permanent: true, direction: 'left', className: 'rank', offset: [-6, 0] })
+        .bindPopup(`<b>Crag C${p.rank}</b> · ${p.faces} face${p.faces > 1 ? 's' : ''}, ${p.length} m of cliff in total<br>
+          tallest face ${cliffInfo(p, false)}<br>${links(lat, lon)}`).addTo(cragLayer);
+    }
+  }
+  if (cliffs) $('cliffStatus').textContent = `— ${cliffs.features.length} faces, ${crags ? crags.features.length : 0} crags`;
+}
+['cliffOn', 'cragOn', 'softOn', 'unmOn', 'band', 'cn', 'ang'].forEach(id => $(id).addEventListener('input', renderCliffs));
+$('cn').addEventListener('change', syncUrl);
+$('ang').addEventListener('change', syncUrl);
+cliffLayer.addTo(map); cragLayer.addTo(map);
+
+// --- right-click: note for improving the site -> clipboard (note + location + view link + nearby features)
+let pinsGeo = null;
+fetch('../groundtruth/cranberry_pins.geojson').then(r => r.json()).then(g => { pinsGeo = g; }).catch(() => {});
+function nearest(features, ll, coordsOf, maxM) {
+  let best = null, bd = Infinity;
+  for (const f of features || []) {
+    for (const [lo, la] of coordsOf(f)) {
+      const d = map.distance(ll, [la, lo]);
+      if (d < bd) { bd = d; best = f; }
+    }
+  }
+  return best && bd <= maxM ? { f: best, d: Math.round(bd) } : null;
+}
+const pt = f => [f.geometry.coordinates];
+const ln = f => f.geometry.coordinates;
+const pick = (p, keys) => keys.filter(k => p[k] != null).map(k => `${k}=${p[k]}`).join(' ');
+function feedbackText(ll, note) {
+  const lat = ll.lat.toFixed(6), lon = ll.lng.toFixed(6);
+  const here = new URLSearchParams(stateParams());
+  here.set('c', `${lat},${lon},${Math.max(map.getZoom(), 16)}`);
+  const base = location.href.split('?')[0];
+  const out = [
+    `NB Boulders site note — ${new Date().toLocaleString('sv-SE', { timeZoneName: 'short' }).slice(0, 16)} local`,
+    `Note: ${note.trim() || '(none)'}`,
+    `Point: ${lat}, ${lon} · zoom ${map.getZoom()} · region ${REGION}`,
+    `View: ${base}?${here.toString().replace(/%2C/g, ',')}`,
+  ];
+  const h = nearest(hot && hot.features, ll, pt, 500);
+  if (h) out.push(`Nearest hotspot (${h.d} m): #${h.f.properties._r ?? '?'} ${pick(h.f.properties,
+    ['density', 'score', 'field_ha', 'geo_w', 'upice_km', 'bedrock', 'lith', 'surf', 'crown', 'known', 'pct'])}`);
+  const c = nearest(crags && crags.features, ll, pt, 300);
+  if (c) out.push(`Nearest crag (${c.d} m): C${c.f.properties.rank} ${pick(c.f.properties,
+    ['height', 'length', 'faces', 'aspect_name', 'angle', 'angle_p90', 'surf', 'rock_w', 'ravine', 'bedrock', 'crown'])}`);
+  const fc = nearest(cliffs && cliffs.features, ll, ln, 150);
+  if (fc) out.push(`Nearest cliff face (${fc.d} m): ${pick(fc.f.properties,
+    ['crag', 'height', 'length', 'aspect_name', 'slope', 'angle', 'angle_p90', 'surf', 'rock_w', 'ravine', 'band'])}`);
+  const pn = nearest(pinsGeo && pinsGeo.features, ll, pt, 2000);
+  if (pn) out.push(`Nearest pin (${pn.d} m): ${pn.f.properties.name}`);
+  if (!h && !c && !fc) out.push('No hotspot within 500 m, crag within 300 m or cliff face within 150 m.');
+  return out.join('\n');
+}
+map.on('contextmenu', e => {
+  const box = L.DomUtil.create('div', 'fb');
+  box.innerHTML = `<b>Note to improve the site</b><br><textarea placeholder="What's wrong or missing here?"></textarea>
+    <div class="row2"><button>Copy</button><small>⌘/Ctrl+Enter</small><span class="msg"></span></div>`;
+  const ta = box.querySelector('textarea'), msg = box.querySelector('.msg');
+  const copy = async () => {
+    const text = feedbackText(e.latlng, ta.value);
+    try { await navigator.clipboard.writeText(text); msg.textContent = 'Copied to clipboard'; setTimeout(() => map.closePopup(), 900); }
+    catch { ta.value = text; ta.select(); msg.textContent = 'Press ⌘/Ctrl+C to copy'; }
+  };
+  box.querySelector('button').onclick = copy;
+  ta.addEventListener('keydown', ev => { if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); copy(); } });
+  L.DomEvent.disableClickPropagation(box); L.DomEvent.disableScrollPropagation(box);
+  L.popup({ maxWidth: 300, minWidth: 270 }).setLatLng(e.latlng).setContent(box).openOn(map);
+  setTimeout(() => ta.focus(), 50);
+});
+
+(async () => {
+  try {
+    const regs = await (await fetch('../results/regions.json', { cache: 'no-store' })).json();
+    for (const r of regs) $('region').add(new Option(r.replace(/_/g, ' '), r, r === REGION, r === REGION));
+    $('region').onchange = e => { location.search = '?' + stateParams(e.target.value, false); };
+  } catch {}
+  $('status').textContent = `— loading ${REGION.replace(/_/g, ' ')}…`;
+  const o = await loadHeat();
+  // jump to the region as soon as its (tiny) bounds arrive — hotspots/cliffs can be tens of MB
+  if (o && !HAS_START) map.fitBounds(o.bounds);
+  ready = true;
+  syncUrl();
+  const getJson = async n => (await fetch(`../results/${n}.geojson`, { cache: 'no-store' })).json();
+  const [h, cl, cr] = await Promise.allSettled([`${REGION}_hotspots`, `${REGION}_cliffs`, `${REGION}_crags`].map(getJson));
+  hot = h.status === 'fulfilled' ? h.value : null;
+  renderHot();
+  if (cl.status === 'fulfilled' && cr.status === 'fulfilled') { cliffs = cl.value; crags = cr.value; }
+  else { cliffs = crags = null; $('cliffStatus').textContent = '(not built for this region yet)'; }
+  renderCliffs();
+})();
+</script>
+</body>
+</html>
